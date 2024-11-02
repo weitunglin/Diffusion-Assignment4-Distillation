@@ -108,7 +108,8 @@ def run(args):
         else:
             raise ValueError("Invalid loss type")
         
-        (2000 * loss).backward()
+        if args.loss_type == "pds":
+            (2000 * loss).backward()
             
         optimizer.step()
         scheduler.step()
