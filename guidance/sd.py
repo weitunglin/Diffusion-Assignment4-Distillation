@@ -94,9 +94,10 @@ class StableDiffusion(nn.Module):
         gradient = timestep_weight * noise_diff
         gradient = torch.nan_to_num(gradient)
 
-        latents.backward(gradient=gradient, retain_graph=True)
-        
-        return torch.tensor([0.0], device=self.device)
+        targets = (latents - gradient).detach()
+        loss = 0.5 * torch.nn.functional.mse_loss(latents, targets)
+
+        return loss
     
     def get_pds_loss(
         self, src_latents, tgt_latents, 
@@ -104,23 +105,18 @@ class StableDiffusion(nn.Module):
         guidance_scale=7.5, 
         grad_scale=1,
     ):
-        batch_size = src_latents.shape[0]
-        self.scheduler.set_timesteps(self.num_train_timesteps)
-        timesteps = reversed(self.scheduler.timesteps)
-        max_step = max(self.max_step, self.min_step + 1)
-        
-        idx = torch.randint(
-            self.min_step, max_step, 
-            [batch_size], 
+        t = torch.randint(
+            self.min_step,
+            self.max_step, 
+            (src_latents.shape[0],),
             dtype=torch.long, 
-            device="cpu"
         )
         
-        t = timesteps[idx].cpu()
-        t_prev = timesteps[idx - 1].cpu()
+        t_prev = t - 1
 
         beta_t = self.scheduler.betas[t].to(self.device)
-        alpha_bar_t = self.scheduler.alphas_cumprod[t].to(self.device) 
+        alpha_t = self.scheduler.alphas[t].to(self.device)
+        alpha_bar_t = self.scheduler.alphas_cumprod[t].to(self.device)
         alpha_bar_t_prev = self.scheduler.alphas_cumprod[t_prev].to(self.device)
         sigma_t = torch.sqrt((1 - alpha_bar_t_prev) / (1 - alpha_bar_t) * beta_t)
 
@@ -148,11 +144,6 @@ class StableDiffusion(nn.Module):
             noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
             x_t_prev = self.scheduler.add_noise(latent, noise_t_prev, t_prev)
-            
-            beta_t = self.scheduler.betas[t].to(self.device)
-            alpha_t = self.scheduler.alphas[t].to(self.device)
-            alpha_bar_t = self.scheduler.alphas_cumprod[t].to(self.device)
-            alpha_bar_t_prev = self.scheduler.alphas_cumprod[t_prev].to(self.device)
 
             sqrt_one_minus_alpha = torch.sqrt(1 - alpha_bar_t)
             sqrt_alpha = torch.sqrt(alpha_bar_t)
